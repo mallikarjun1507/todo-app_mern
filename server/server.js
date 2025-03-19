@@ -1,88 +1,118 @@
 const express = require("express");
-const mysql = require("mysql")
-const bodyParser = require('body-parser');
-const cors = require("cors")
+const mysql = require("mysql2");
+const bodyParser = require("body-parser");
+const cors = require("cors");
 
-const app = express()
-app.use(bodyParser.json())
-app.use(cors()) 
+const app = express();
+app.use(bodyParser.json());
+app.use(cors());
 
-const dbConfig ={
-  host: 'localhost',
-  user: 'root',
-  password: '',
-  database: 'todo_app'
-}
-const dataBase = mysql.createConnection({dbConfig})
+const dbConfig = {
+  host: "localhost",
+  user: "root",
+  password: "Root",  // Change if needed
+  multipleStatements: true, // Allows multiple SQL queries
+};
 
-// Function to create the database and tables if they don't exist
+// Create a connection to MySQL **without selecting a database first**
+const dataBase = mysql.createConnection(dbConfig);
 
-const createDataBaseAndTabels = () =>{
-  dataBase.connect(err =>{
-    if(err){
-        console.error('Error connecting: ' + err.stack);
-        return;
-    }
-    dataBase.query('CREATE DATABASE IF NOT EXISTS todo_app', err=>{
+dataBase.connect((err) => {
+  if (err) {
+    console.error("Error connecting to MySQL:", err);
+    return;
+  }
+  console.log("Connected to MySQL successfully.");
+
+  // Step 1: Create the database if it doesn't exist
+  dataBase.query("CREATE DATABASE IF NOT EXISTS todo_app", (err) => {
+    if (err) throw err;
+    console.log("Database created or already exists.");
+
+    // Step 2: Change to the newly created database
+    dataBase.changeUser({ database: "todo_app" }, (err) => {
       if (err) throw err;
-      console.log('Database created or successfully checked.');
-      dataBase.config('todo_app')
-      dataBase.changeUser({database: dbConfig.database }, err=>{
-        if (err) throw err;
-        console.log('Using database: ' + dbConfig.database);
-        database.query(`CREATE TABLE IF NOT EXISTS tasks(
+      console.log("Using database: todo_app");
+
+      // Step 3: Create the 'tasks' table if it doesn't exist
+      const createTableQuery = `CREATE TABLE IF NOT EXISTS tasks (
           id INT AUTO_INCREMENT PRIMARY KEY,
           title VARCHAR(255) NOT NULL,
           completed BOOLEAN DEFAULT FALSE
-        )`,err=>{
-          if (err) throw err;
-          console.log('Tasks table created or already exists.');
-        })
-      })
+      )`;
 
-    })
-  })
-}
+      dataBase.query(createTableQuery, (err) => {
+        if (err) throw err;
+        console.log("Tasks table created or already exists.");
+      });
+    });
+  });
+});
 
-createDataBaseAndTabels();
-// Get all tasks
-app.get('/tasks', (req, res) => {
-    let sql = 'SELECT * FROM tasks';
-    dataBase.query(sql, (err, results) => {
-      if (err) throw err;
-      res.json(results);
-    });
+// ✅ Get all tasks
+app.get("/tasks", (req, res) => {
+  const sql = "SELECT * FROM tasks";
+  dataBase.query(sql, (err, results) => {
+    if (err) {
+      console.error("Error fetching tasks:", err);
+      return res.status(500).json({ error: "Database error" });
+    }
+    res.json(results);
   });
-  
-  // Add new task
-  app.post('/tasks', (req, res) => {
-    let task = { title: req.body.title, completed: req.body.completed };
-    let sql = 'INSERT INTO tasks SET ?';
-    dataBase.query(sql, task, (err, result) => {
-      if (err) throw err;
-      res.json({ id: result.insertId, ...task });
-    });
+});
+
+// ✅ Add a new task
+app.post("/tasks", (req, res) => {
+  const { title, completed = false } = req.body;
+  const sql = "INSERT INTO tasks (title, completed) VALUES (?, ?)";
+  dataBase.query(sql, [title, completed], (err, result) => {
+    if (err) {
+      console.error("Error inserting task:", err);
+      return res.status(500).json({ error: "Database error" });
+    }
+    res.json({ id: result.insertId, title, completed });
   });
-  
-  // Update task
-  app.put('/tasks/:id', (req, res) => {
-    let newTitle = req.body.title;
-    let newCompleted = req.body.completed;
-    let sql = `UPDATE tasks SET title = '${newTitle}', completed = ${newCompleted} WHERE id = ${req.params.id}`;
-    dataBase.query(sql, (err, result) => {
-      if (err) throw err;
-      res.json(result);
-    });
+});
+
+// ✅ Update a task
+app.put("/tasks/:id", (req, res) => {
+  const { title, completed } = req.body;
+  const { id } = req.params;
+
+  if (title === undefined || completed === undefined) {
+    return res.status(400).json({ error: "Title and completed status are required" });
+  }
+
+  const sql = "UPDATE tasks SET title = ?, completed = ? WHERE id = ?";
+  dataBase.query(sql, [title, completed, id], (err, result) => {
+    if (err) {
+      console.error("Error updating task:", err);
+      return res.status(500).json({ error: "Database error" });
+    }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Task not found" });
+    }
+    res.json({ message: "Task updated successfully" });
   });
-  
-  // Delete task
-  app.delete('/tasks/:id', (req, res) => {
-    let sql = `DELETE FROM tasks WHERE id = ${req.params.id}`;
-    dataBase.query(sql, (err, result) => {
-      if (err) throw err;
-      res.json(result);
-    });
+});
+
+// ✅ Delete a task
+app.delete("/tasks/:id", (req, res) => {
+  const { id } = req.params;
+  const sql = "DELETE FROM tasks WHERE id = ?";
+
+  dataBase.query(sql, [id], (err, result) => {
+    if (err) {
+      console.error("Error deleting task:", err);
+      return res.status(500).json({ error: "Database error" });
+    }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Task not found" });
+    }
+    res.json({ message: "Task deleted successfully" });
   });
-  
+});
+
+// Start the server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`the server runing on port ${PORT}`))
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
